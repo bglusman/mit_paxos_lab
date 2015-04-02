@@ -7,6 +7,7 @@ import "fmt"
 
 type WorkerInfo struct {
 	address string
+	currentJobId int
 	// You can add definitions here.
 }
 
@@ -36,111 +37,123 @@ func (mr *MapReduce) KillWorkers() *list.List {
 }
 
 func CheckAllReplies(replies []DoJobReply, allGood chan bool){
-	fmt.Println("checking replies")
+	//fmt.Println("checking replies")
 	for {
 		allDone := true
 		for reply := range replies {
-			fmt.Println("reply value:", replies[reply])
+			//fmt.Println("reply value:", replies[reply])
 			if !replies[reply].OK { allDone = false; break }
 		}
-		fmt.Println("checking if all good")
-		if allDone { allGood <- true ; fmt.Println("all good!!!") ;return }
+		//fmt.Println("checking if all good")
+		if allDone { allGood <- true ; return }//fmt.Println("all good!!!") ;return }
 	}
 }
 
+func (mr *MapReduce) RunWorker(workerId string, workerChannel chan string, jobQueue chan DoJobArgs, completeJobs *int) {
+	jobArgs := <- jobQueue
+	reply := DoJobReply{}
+	call(workerId, "Worker.DoJob",jobArgs, &reply)
+	if reply.OK {
+		workerChannel <- workerId
+		*completeJobs++
+	} else {
+		jobQueue <- jobArgs
+	}
+
+}
 func (mr *MapReduce) RunMaster() *list.List {
 
-			// workerStrings := make([]string, 2)
-			info1 := new(WorkerInfo)
-			info2 := new(WorkerInfo)
-			info1.SetAddress( <- mr.registerChannel)
-			info2.SetAddress( <- mr.registerChannel)
-			mapReplies :=  make([]DoJobReply, mr.nMap)
-			reduceReplies := make([]DoJobReply, mr.nReduce)
-			mapQueue := make(chan DoJobArgs, mr.nMap)
-			reduceQueue := make(chan DoJobArgs, mr.nReduce)
-			doneChannel := make(chan bool)
-			fmt.Println("made queues")
-			for n:=0;n < mr.nMap; n++ {
-				fmt.Println("making queues")
-				mapQueue <- DoJobArgs{mr.file, Map, n, mr.nReduce}
-			}
-			fmt.Println("populated map queue")
-			close(mapQueue)
-			go func(){
-				for worker2jobArgs := range mapQueue {
-					call(info2.Address(), "Worker.DoJob",worker2jobArgs, &mapReplies[worker2jobArgs.JobNumber])
-				}
-				fmt.Println("write done channel 1")
-				doneChannel <- true
-			}()
-			fmt.Println("created worker 1 map calls")
-			go func(){
-				for worker1jobArgs := range mapQueue {
-					call(info1.Address(), "Worker.DoJob",worker1jobArgs, &mapReplies[worker1jobArgs.JobNumber])
-				}
-				fmt.Println("write done channel 2")
-				doneChannel <- true
-			}()
-			fmt.Println("created worker 0 map calls")
-			<- doneChannel
-			fmt.Println("done channel 1")
-			<- doneChannel
-			fmt.Println("done channel 2")
-			go CheckAllReplies(mapReplies, doneChannel)
-			<- doneChannel
+	jobQueue := make(chan DoJobArgs)
+	completeJobsCount := 0
+	go func(){
+		for workerId := range mr.registerChannel {
+			go mr.RunWorker(workerId, mr.registerChannel, jobQueue, &completeJobsCount)
+		}
+	}()
 
-			for n:=0;n < mr.nReduce; n++ {
-				doJobArgs2 := DoJobArgs{mr.file, Reduce, n, mr.nMap}
-				reduceQueue <- doJobArgs2
-			}
-			close(reduceQueue)
-			fmt.Println("populated reduce queue")
-			go func(){
-				for worker1jobArgs := range reduceQueue {
-					call(info1.Address(), "Worker.DoJob",worker1jobArgs, &reduceReplies[worker1jobArgs.JobNumber])
-				}
-				doneChannel <- true
-				fmt.Println("reduce routine 1 done")
-			}()
-			go func(){
-				for worker2jobArgs := range reduceQueue {
-					call(info2.Address(), "Worker.DoJob",worker2jobArgs, &reduceReplies[worker2jobArgs.JobNumber])
-				}
-				doneChannel <- true
-				fmt.Println(" reduce routine 2 done")
-			}()
+	for n:=0;n < mr.nMap; n++ {
+		jobQueue <- DoJobArgs{mr.file, Map, n, mr.nReduce}
+	}
 
-			fmt.Println("launched reduce goroutines")
+	for completeJobsCount < mr.nMap {
 
-		  // mr.Workers["first"] := info1
-		  // mr.Workers["second"] := info2
-		  // c1,err1 := net.Dial("unix",workerStrings[0])
-		  // c2,err2 := net.Dial("unix",workerStrings[1])
-		  // if err1 == nil && err2 == nil {
-			 //  c1.Write([]byte("hi1\n"))
-			 //  c2.Write([]byte("hi2\n"))
-		  // }
-			<- doneChannel
-			<- doneChannel
-			go CheckAllReplies(reduceReplies, doneChannel)
-			<- doneChannel
+	}
+	for n:=0;n < mr.nReduce; n++ {
+		jobQueue <- DoJobArgs{mr.file, Reduce, n, mr.nMap}
+	}
 
-			fmt.Println("sending mr.donechannel=true")
+	// workerStrings := make([]string, 2)
+	// info1 := new(WorkerInfo)
+	// info2 := new(WorkerInfo)
+	// info1.SetAddress( <- mr.registerChannel)
+	// info2.SetAddress( <- mr.registerChannel)
+	// mapReplies :=  make([]DoJobReply, mr.nMap)
+	// reduceReplies := make([]DoJobReply, mr.nReduce)
 
-		  // mr.DoneChannel <- true
-		// keys := make([]int, 0, len(mr.Workers))
-    // for key,worker := range mr.Workers {
-    // 	fmt.Println("worker:",worker)
-    // 	fmt.Println("key:",key)
-    //   // keys = append(keys, k)
-    // }
+	// reduceQueue := make(chan DoJobArgs, mr.nReduce)
+	// doneChannel := make(chan bool)
+	//fmt.Println("made queues")
 
-   //  for key := range keys {
-			// fmt.Println(key)
-   //  }
+	//fmt.Println("populated map queue")
+	// close(mapQueue)
+	// go func(){
+	// 	ok := true
+	// 	i :=0
+	// 	for worker2jobArgs := range mapQueue {
+	// 		//fmt.Println("Sending... 1", i)
+	// 		ok =  call(info2.Address(), "Worker.DoJob",worker2jobArgs, &mapReplies[worker2jobArgs.JobNumber])
+	// 		//fmt.Println("ok returned worker 1", ok, info2.Address())
+	// 		i++
+	// 	}
+	// 	<- doneChannel
+	// 	doneChannel <- true
+	// }()
+	// //fmt.Println("created worker 1 map calls")
+	// go func(){
+	// 	ok := true
+	// 	i :=0
+	// 	for worker1jobArgs := range mapQueue {
+	// 		//fmt.Println("sending... 0", i)
+	// 		ok = call(info1.Address(), "Worker.DoJob",worker1jobArgs, &mapReplies[worker1jobArgs.JobNumber])
+	// 		//fmt.Println("ok returned worker 0", ok, info1.Address())
+	// 		i++
+	// 	}
+	// 	//fmt.Println("write done channel 2")
+	// 	doneChannel <- true
+	// }()
+	// //fmt.Println("created worker 0 map calls")
+	// <- doneChannel
+	// //fmt.Println("done channel 1")
+	// <- doneChannel
+	// //fmt.Println("done channel 2")
+	// go CheckAllReplies(mapReplies, doneChannel)
+	// <- doneChannel
 
-    // fmt.Println(keys)
+	// for n:=0;n < mr.nReduce; n++ {
+	// 	doJobArgs2 := DoJobArgs{mr.file, Reduce, n, mr.nMap}
+	// 	reduceQueue <- doJobArgs2
+	// }
+	// close(reduceQueue)
+	// //fmt.Println("populated reduce queue")
+	// go func(){
+	// 	for worker1jobArgs := range reduceQueue {
+	// 		call(info1.Address(), "Worker.DoJob",worker1jobArgs, &reduceReplies[worker1jobArgs.JobNumber])
+	// 	}
+	// 	doneChannel <- true
+	// 	//fmt.Println("reduce routine 1 done")
+	// }()
+	// go func(){
+	// 	for worker2jobArgs := range reduceQueue {
+	// 		call(info2.Address(), "Worker.DoJob",worker2jobArgs, &reduceReplies[worker2jobArgs.JobNumber])
+	// 	}
+	// 	doneChannel <- true
+	// 	//fmt.Println(" reduce routine 2 done")
+	// }()
+
+	// <- doneChannel
+	// <- doneChannel
+	// go CheckAllReplies(reduceReplies, doneChannel)
+	// <- doneChannel
 
 	return mr.KillWorkers()
 }
