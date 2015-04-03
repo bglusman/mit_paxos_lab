@@ -2,7 +2,6 @@ package mapreduce
 
 import "container/list"
 import "fmt"
-import "time"
 // import "net"
 
 type WorkerInfo struct {
@@ -36,13 +35,17 @@ func (mr *MapReduce) KillWorkers() *list.List {
 	return l
 }
 
-func (mr *MapReduce) RunWorker(workerId string, workerChannel chan string, jobQueue chan DoJobArgs, completeJobs *int) {
+func (mr *MapReduce) RunWorker(workerId string,
+															 workerChannel chan string,
+															 jobQueue chan DoJobArgs,
+															 completeJobs chan int) {
 	jobArgs := <- jobQueue
 	reply := DoJobReply{}
 	call(workerId, "Worker.DoJob",jobArgs, &reply)
 	if reply.OK {
 		workerChannel <- workerId
-		*completeJobs++
+		count := <- completeJobs
+		completeJobs <- count + 1
 	} else {
 		jobQueue <- jobArgs
 	}
@@ -51,24 +54,28 @@ func (mr *MapReduce) RunWorker(workerId string, workerChannel chan string, jobQu
 func (mr *MapReduce) RunMaster() *list.List {
 
 	jobQueue := make(chan DoJobArgs)
-	completeJobsCount := 0
+	completeJobs := make(chan int)
 	go func(){
 		for workerId := range mr.registerChannel {
-			go mr.RunWorker(workerId, mr.registerChannel, jobQueue, &completeJobsCount)
+			go mr.RunWorker(workerId, mr.registerChannel, jobQueue, completeJobs)
 		}
 	}()
 
 	for n:=0;n < mr.nMap; n++ {
 		jobQueue <- DoJobArgs{mr.file, Map, n, mr.nReduce}
 	}
+	completeJobs <- 0
+	fmt.Println("created map jobs:", mr.nMap)
+	for completeJobsCount := range completeJobs {
+		fmt.Println("completeJobs:", completeJobsCount)
+		if completeJobsCount < mr.nMap {
+				completeJobs <- completeJobsCount
+			 } else { break }
 
-	for completeJobsCount < mr.nMap {
-		fmt.Println("jobs remaining, jobCount:", completeJobsCount )
-		time.Sleep(1 * time.Millisecond)
 	}
 	for n:=0;n < mr.nReduce; n++ {
 		jobQueue <- DoJobArgs{mr.file, Reduce, n, mr.nMap}
 	}
-
+	fmt.Println("created reduce jobs:", mr.nReduce)
 	return mr.KillWorkers()
 }
